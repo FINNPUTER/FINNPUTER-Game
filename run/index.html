@@ -10,7 +10,7 @@
   html,body{height:100%;width:100%;overflow:hidden;background:#05060c;font-family:'JetBrains Mono','SF Mono',monospace;color:#cfe9da;touch-action:none;user-select:none;-webkit-user-select:none;}
   canvas{display:block;position:fixed;inset:0;}
   .btn{position:fixed;z-index:6;display:flex;align-items:center;justify-content:center;border-radius:50%;
-    background:rgba(11,14,22,.62);border:1px solid rgba(22,255,155,.35);color:#cfe9da;font-size:26px;font-weight:bold;}
+    background:rgba(11,14,22,.62);border:1px solid rgba(22,255,155,.35);color:#cfe9da;font-size:26px;font-weight:bold;pointer-events:none;}
   #bL{left:calc(env(safe-area-inset-left) + 18px); bottom:calc(env(safe-area-inset-bottom) + 26px); width:64px;height:64px;}
   #bR{left:calc(env(safe-area-inset-left) + 92px); bottom:calc(env(safe-area-inset-bottom) + 26px); width:64px;height:64px;}
   #bJ{right:calc(env(safe-area-inset-right) + 22px); bottom:calc(env(safe-area-inset-bottom) + 30px); width:84px;height:84px;
@@ -106,7 +106,7 @@ const ST={READY:0,PLAY:1,DEAD:2,WIN:3}; let state=ST.READY;
 const P={x:0,y:0,w:TILE*0.66,h:TILE*0.92,vx:0,vy:0,onG:false,face:1,coyote:0,buf:0,inv:0,squash:0};
 let score=0, lives=3, camX=0, shake=0, lastSafeX=0,lastSafeY=0, won=false;
 const parts=[], stars=[], skyline=[];
-const GRAV=2500, MOVE=2000, FRIC=1700, MAXRUN=330, JUMP=-820, MAXFALL=1200;
+const GRAV=2500, MOVE=3000, FRIC=2400, MAXRUN=330, JUMP=-820, MAXFALL=1200;
 const keys={l:false,r:false,j:false};
 
 let best=0; try{ best=parseInt(localStorage.getItem('bullrun_best')||'0',10)||0; }catch(e){}
@@ -125,17 +125,33 @@ function finalize(){ document.getElementById('flex').style.display='block'; if(s
 let overAt=0;
 
 // ---- input ----
-function press(k,v){ keys[k]=v; if(k==='j'&&v){ P.buf=0.12; if(!AC)ac(); startMusic(); } }
-function bind(id,k){ const el=document.getElementById(id);
-  el.addEventListener('pointerdown',e=>{e.preventDefault(); if(state===ST.READY){reset();startMusic();return;} if(state===ST.DEAD||state===ST.WIN){ if(Date.now()-overAt>400){reset();startMusic();} return;} press(k,true);});
-  el.addEventListener('pointerup',e=>{e.preventDefault(); press(k,false);});
-  el.addEventListener('pointerleave',e=>{ press(k,false);});
-  el.addEventListener('pointercancel',e=>{ press(k,false);}); }
-bind('bL','l'); bind('bR','r'); bind('bJ','j');
-addEventListener('keydown',e=>{ if(e.repeat)return; if(state===ST.READY){reset();startMusic();return;} if(state===ST.DEAD||state===ST.WIN){ if(Date.now()-overAt>400){reset();startMusic();} return;}
-  if(e.key==='ArrowLeft')press('l',true); if(e.key==='ArrowRight')press('r',true); if(e.key===' '||e.key==='ArrowUp'||e.key==='z')press('j',true); });
-addEventListener('keyup',e=>{ if(e.key==='ArrowLeft')press('l',false); if(e.key==='ArrowRight')press('r',false); if(e.key===' '||e.key==='ArrowUp'||e.key==='z')press('j',false); });
-cv.addEventListener('pointerdown',()=>{ if(state===ST.READY){reset();startMusic();} else if((state===ST.DEAD||state===ST.WIN)&&Date.now()-overAt>400){reset();startMusic();} });
+function press(k,v){ if(k==='j'){ if(v){ if(!keys.j){ keys.j=true; P.buf=0.12; if(!AC)ac(); startMusic(); } } else keys.j=false; return; } keys[k]=v; }
+function startOrRetry(){ if(state===ST.READY){ reset(); startMusic(); return true; } if((state===ST.DEAD||state===ST.WIN)&&Date.now()-overAt>400){ reset(); startMusic(); return true; } return false; }
+// touch zones: left/right pads bottom-left, the whole right side jumps. assignment is locked per finger
+// (so a drifting thumb never releases), and multi-touch lets you run + jump at once.
+const touches={};
+function rectOf(id){ return document.getElementById(id).getBoundingClientRect(); }
+function zone(x,y){ const L=rectOf('bL'),R=rectOf('bR');
+  if(x>=L.left-10&&x<=L.right+10&&y>=L.top-14&&y<=L.bottom+14) return 'l';
+  if(x>=R.left-10&&x<=R.right+10&&y>=R.top-14&&y<=R.bottom+14) return 'r';
+  if(x> innerWidth*0.42) return 'j';
+  return null; }
+function recompute(){ let l=false,r=false; for(const k in touches){ if(touches[k]==='l')l=true; else if(touches[k]==='r')r=true; } keys.l=l; keys.r=r; }
+cv.addEventListener('touchstart',e=>{ e.preventDefault();
+  for(const t of e.changedTouches){ if(startOrRetry()){ for(const k in touches)delete touches[k]; keys.l=keys.r=keys.j=false; return; }
+    const z=zone(t.clientX,t.clientY); if(!z)continue; touches[t.identifier]=z; if(z==='j')press('j',true); }
+  recompute();
+},{passive:false});
+function endTouch(e){ e.preventDefault(); for(const t of e.changedTouches){ if(touches[t.identifier]==='j')press('j',false); delete touches[t.identifier]; } recompute(); }
+cv.addEventListener('touchend',endTouch,{passive:false});
+cv.addEventListener('touchcancel',endTouch,{passive:false});
+// mouse (desktop)
+let mz=null;
+cv.addEventListener('mousedown',e=>{ if(startOrRetry())return; const z=zone(e.clientX,e.clientY); if(!z)return; mz=z; if(z==='j')press('j',true); else keys[z]=true; });
+addEventListener('mouseup',()=>{ if(mz==='j')press('j',false); else if(mz)keys[mz]=false; mz=null; });
+// keyboard
+addEventListener('keydown',e=>{ if(e.repeat)return; if(startOrRetry())return; if(e.key==='ArrowLeft')keys.l=true; else if(e.key==='ArrowRight')keys.r=true; else if(e.key===' '||e.key==='ArrowUp'||e.key==='z')press('j',true); });
+addEventListener('keyup',e=>{ if(e.key==='ArrowLeft')keys.l=false; else if(e.key==='ArrowRight')keys.r=false; else if(e.key===' '||e.key==='ArrowUp'||e.key==='z')press('j',false); });
 
 // ---- share ----
 function buildCard(){ const c=document.createElement('canvas'); c.width=1080;c.height=1350; const x=c.getContext('2d');
@@ -270,7 +286,7 @@ function draw(){
     ctx.fillStyle='#16ff9b'; ctx.font='12px monospace'; ctx.fillText(CFG.TOKEN,W/2,H*0.28+24);
     ctx.fillStyle='#ffcf4d'; ctx.font='bold 13px monospace'; ctx.fillText('— HOW TO PLAY —',W/2,H*0.42);
     ctx.fillStyle='#cfe9da'; ctx.font='13px monospace';
-    const L=['◀ ▶ move   ·   JUMP to jump','Stomp the bears 🐻 (+$2)','Grab every $','Reach the moon 🌙'];
+    const L=['◀ ▶ run  ·  tap RIGHT side = jump','Stomp the bears (+$2)','Grab every $','Reach the moon'];
     for(let i=0;i<L.length;i++) ctx.fillText(L[i],W/2,H*0.42+30+i*26);
     const a=0.5+Math.sin(performance.now()/250)*0.5; ctx.globalAlpha=a; ctx.fillStyle='#fff'; ctx.font='bold 16px monospace'; ctx.fillText('▶  TAP TO START',W/2,H*0.72); ctx.globalAlpha=1;
     if(best>0){ ctx.fillStyle='#5a7180'; ctx.font='12px monospace'; ctx.fillText('BEST  $'+best,W/2,H*0.72+26);} }
